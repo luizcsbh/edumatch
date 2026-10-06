@@ -1,0 +1,97 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: edumatch-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: edumatch
+      MYSQL_USER: edumatch
+      MYSQL_PASSWORD: edumatch
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - edumatch-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 5s
+      retries: 10
+
+  matching-ml-service:
+    build:
+      context: ./matching-ml-service
+      dockerfile: Dockerfile
+    container_name: edumatch-ml-service
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      ML_SERVICE_PORT: 3001
+      ML_SERVICE_HOST: 0.0.0.0
+      MATCH_THRESHOLD: 0.90
+      NO_MATCH_THRESHOLD: 0.30
+      MODEL_PATH: ./models/model-v1.0.0
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./matching-ml-service/models:/app/models
+      - ./dataset-pipeline/datasets:/app/datasets:ro
+    networks:
+      - edumatch-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: edumatch-backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      matching-ml-service:
+        condition: service_started
+    environment:
+      APP_NAME: EduMatch
+      APP_ENV: production
+      APP_DEBUG: "false"
+      APP_KEY: base64:3B7f8zWn5U9oN7kX4dG8v2Y1qL6pA9sF0jM2eR5tY8u=
+      DB_CONNECTION: mysql
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_DATABASE: edumatch
+      DB_USERNAME: edumatch
+      DB_PASSWORD: edumatch
+      EDUMATCH_ML_SERVICE_URL: http://matching-ml-service:3001
+      EDUMATCH_MATCH_THRESHOLD: 0.90
+      EDUMATCH_NO_MATCH_THRESHOLD: 0.30
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./lista-alunos-chromos-normalizada.csv:/app/data/lista-alunos-chromos-normalizada.csv:ro
+      - ./8a-Chamada-da-Lista-de-Espera-SISU-2026.xlsx:/app/data/8a-Chamada-da-Lista-de-Espera-SISU-2026.xlsx:ro
+    networks:
+      - edumatch-network
+
+  dataset-pipeline:
+    build:
+      context: ./dataset-pipeline
+      dockerfile: Dockerfile
+    container_name: edumatch-dataset-pipeline
+    profiles:
+      - tools
+    volumes:
+      - ./lista-alunos-chromos-normalizada.csv:/app/../lista-alunos-chromos-normalizada.csv:ro
+      - ./8a-Chamada-da-Lista-de-Espera-SISU-2026.xlsx:/app/../8a-Chamada-da-Lista-de-Espera-SISU-2026.xlsx:ro
+      - ./dataset-pipeline/datasets:/app/datasets
+      - ./dataset-pipeline/manifests:/app/manifests
+    networks:
+      - edumatch-network
+
+volumes:
+  mysql_data:
+    driver: local
+
+networks:
+  edumatch-network:
+    driver: bridge

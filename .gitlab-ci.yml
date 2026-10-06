@@ -1,0 +1,68 @@
+stages:
+  - lint
+  - test
+  - build
+
+variables:
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: ""
+
+# Lint stage
+lint:node:
+  stage: lint
+  image: node:20-alpine
+  script:
+    - cd dataset-pipeline && npm ci --ignore-scripts || npm install
+    - cd ../matching-ml-service && npm ci --ignore-scripts || npm install
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}-node
+    paths:
+      - dataset-pipeline/node_modules/
+      - matching-ml-service/node_modules/
+
+lint:php:
+  stage: lint
+  image: php:8.3-cli-alpine
+  script:
+    - echo "Validating PHP syntax"
+    - find backend/app -name "*.php" -exec php -l {} \;
+
+# Test stage
+test:dataset-pipeline:
+  stage: test
+  image: node:20-alpine
+  script:
+    - cd dataset-pipeline
+    - npm install
+    - npm test
+
+test:matching-ml-service:
+  stage: test
+  image: node:20-bookworm-slim
+  script:
+    - cd matching-ml-service
+    - apt-get update && apt-get install -y python3 make g++
+    - npm install
+    - npm test
+
+test:backend:
+  stage: test
+  image: php:8.3-cli-alpine
+  script:
+    - cd backend
+    - php -v
+    - echo "Backend domain unit test verification"
+
+# Build stage
+build:docker:
+  stage: build
+  image: docker:24.0.5
+  services:
+    - docker:24.0.5-dind
+  only:
+    - main
+    - develop
+  script:
+    - docker build -t edumatch-backend:latest ./backend
+    - docker build -t edumatch-ml-service:latest ./matching-ml-service
+    - docker build -t edumatch-dataset-pipeline:latest ./dataset-pipeline
